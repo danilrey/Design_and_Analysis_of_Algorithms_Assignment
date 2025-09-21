@@ -51,7 +51,7 @@ public class Main {
     @Benchmark
     public int benchmarkDeterministicSelect() {
         int[] arr = baseArray.clone();
-        return DeterministicSelect.select(arr, 3); // Select 25th percentile
+        return DeterministicSelect.select(arr, 3);
     }
 
     @Benchmark
@@ -87,10 +87,7 @@ public class Main {
         System.out.println("___ Algorithm Demo and Correctness Verification ___");
         System.out.println("Array size: " + DEMO_SIZE);
         System.out.println();
-
         int[] BASE = generateDemoBase();
-
-        // Demo runs showing actual results
         System.out.println("___ Demo Results ___");
 
         // MergeSort demo
@@ -149,10 +146,8 @@ public class Main {
 
     public static void main(String[] args) throws RunnerException {
         if (args.length > 0 && args[0].equals("benchmark")) {
-            // Run only JMH benchmarks
             runJMHBenchmarks();
         } else {
-            // Run demo first
             runAlgorithmDemo();
 
             System.out.println("___ Performance Benchmarking ___");
