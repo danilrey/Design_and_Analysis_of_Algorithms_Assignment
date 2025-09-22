@@ -5,6 +5,8 @@ import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
+
+import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
@@ -59,6 +61,12 @@ public class Main {
         Point[] points = new Point[basePoints.length];
         System.arraycopy(basePoints, 0, points, 0, basePoints.length);
         return ClosestPair.closest(points, points.length);
+    }
+
+    @Benchmark
+    public void benchmarkJavaArraysSort() {
+        int[] arr = baseArray.clone();
+        Arrays.sort(arr);
     }
 
     private static int[] generateDemoBase() {
