@@ -1,149 +1,165 @@
 package org.example;
 
-import org.openjdk.jmh.annotations.*;
-import org.openjdk.jmh.runner.Runner;
-import org.openjdk.jmh.runner.RunnerException;
-import org.openjdk.jmh.runner.options.Options;
-import org.openjdk.jmh.runner.options.OptionsBuilder;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
-import java.util.Random;
-import java.util.concurrent.TimeUnit;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
 
-@BenchmarkMode(Mode.AverageTime)
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
-@State(Scope.Benchmark)
-@Fork(value = 2, jvmArgs = {"-Xms2G", "-Xmx2G"})
-@Warmup(iterations = 3)
-@Measurement(iterations = 5)
 public class Main {
+    public static void main(String[] args) {
+        try (InputStream is = Main.class.getClassLoader().getResourceAsStream("json/large_graphs.json")) {
+            if (is == null)
+                throw new IllegalStateException("Resource not found: json/input_example.json");
 
-    @Param({"100", "1000", "10000"})
-    public int arraySize;
+            String jsonText = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            JSONObject root = new JSONObject(jsonText);
+            JSONArray graphsArray = root.getJSONArray("graphs");
 
-    private int[] randomArray;
-    private int[] nearlySortedArray;
-    private int[] reverseSortedArray;
+            Prim prim = new Prim();
+            KruskalsMST kruskal = new KruskalsMST();
 
-    @Setup(Level.Trial)
-    public void setUp() {
-        randomArray = generateRandomArray(arraySize);
-        nearlySortedArray = generateNearlySortedArray(arraySize);
-        reverseSortedArray = generateReverseArray(arraySize);
-    }
+            JSONArray results = new JSONArray();
 
-    // Insertion Sort benchmarks
-    @Benchmark
-    public int[] benchmarkInsertionSortRandom() {
-        int[] arr = randomArray.clone();
-        InsertionSort.sort(arr, arr.length);
-        return arr;
-    }
+            for (int i = 0; i < graphsArray.length(); i++) {
+                JSONObject g = graphsArray.getJSONObject(i);
+                int id = g.getInt("id");
 
-    @Benchmark
-    public int[] benchmarkInsertionSortNearlySorted() {
-        int[] arr = nearlySortedArray.clone();
-        InsertionSort.sort(arr, arr.length);
-        return arr;
-    }
+                Map<Character, Map<Character, Integer>> graphMap = new HashMap<>();
+                JSONArray nodes = g.getJSONArray("nodes");
+                for (int j = 0; j < nodes.length(); j++) {
+                    char node = nodes.getString(j).charAt(0);
+                    graphMap.put(node, new HashMap<>());
+                }
 
-    @Benchmark
-    public int[] benchmarkInsertionSortReverse() {
-        int[] arr = reverseSortedArray.clone();
-        InsertionSort.sort(arr, arr.length);
-        return arr;
-    }
+                JSONArray edges = g.getJSONArray("edges");
+                for (int j = 0; j < edges.length(); j++) {
+                    JSONObject edge = edges.getJSONObject(j);
+                    char u = edge.getString("from").charAt(0);
+                    char v = edge.getString("to").charAt(0);
+                    int w = edge.getInt("weight");
+                    graphMap.get(u).put(v, w);
+                    graphMap.get(v).put(u, w);
+                }
 
-    // Selection Sort benchmarks
-    @Benchmark
-    public int[] benchmarkSelectionSortRandom() {
-        int[] arr = randomArray.clone();
-        SelectionSort.sort(arr, arr.length);
-        return arr;
-    }
+                JSONObject inputStats = new JSONObject();
+                inputStats.put("vertices", nodes.length());
+                inputStats.put("edges", countUniqueEdges(graphMap));
 
-    @Benchmark
-    public int[] benchmarkSelectionSortNearlySorted() {
-        int[] arr = nearlySortedArray.clone();
-        SelectionSort.sort(arr, arr.length);
-        return arr;
-    }
+                long p0 = System.nanoTime();
+                Map<Character, Map<Character, Integer>> mstPrim = prim.primMST(graphMap);
+                long p1 = System.nanoTime();
 
-    @Benchmark
-    public int[] benchmarkSelectionSortReverse() {
-        int[] arr = reverseSortedArray.clone();
-        SelectionSort.sort(arr, arr.length);
-        return arr;
-    }
+                JSONArray primEdges = mstEdgesJson(mstPrim);
+                JSONObject primObj = new JSONObject();
+                primObj.put("mst_edges", primEdges);
+                primObj.put("total_cost", calculateCost(mstPrim));
+                primObj.put("operations_count", Prim.getOperationsCount());
+                primObj.put("execution_time_ms", format2((p1 - p0) / 1_000_000.0));
 
-    public static void main(String[] args) throws RunnerException {
-        System.out.println("Quick Demo:");
-        int[] demo = {64, 34, 25, 12, 22, 11, 90, 5, 77, 30};
-        testSmallArray(demo);
+                KruskalsMST.comparisonCount = 0;
+                DSU.findCount = 0;
+                DSU.unionCount = 0;
 
-        Options opt = new OptionsBuilder()
-                .include(Main.class.getSimpleName())
-                .build();
+                long k0 = System.nanoTime();
+                Map<Character, Map<Character, Integer>> mstKruskal = kruskal.kruskalsMST(graphMap);
+                long k1 = System.nanoTime();
 
-        new Runner(opt).run();
-    }
+                JSONArray kruskalEdges = mstEdgesJson(mstKruskal);
+                JSONObject kruskalObj = new JSONObject();
+                kruskalObj.put("mst_edges", kruskalEdges);
+                kruskalObj.put("total_cost", calculateCost(mstKruskal));
+                kruskalObj.put("operations_count", KruskalsMST.comparisonCount + DSU.findCount + DSU.unionCount);
+                kruskalObj.put("execution_time_ms", format2((k1 - k0) / 1_000_000.0));
 
-    private static void testSmallArray(int[] originalArr) {
-        int[] arr1 = originalArr.clone();
-        int[] arr2 = originalArr.clone();
+                JSONObject resultObj = new JSONObject(new LinkedHashMap<>());
+                resultObj.put("graph_id", id);
+                resultObj.put("input_stats", inputStats);
+                resultObj.put("prim", primObj);
+                resultObj.put("kruskal", kruskalObj);
 
-        System.out.print("Original:         ");
-        printArray(originalArr);
+                results.put(resultObj);
+            }
 
-        InsertionSort.sort(arr1, arr1.length);
-        System.out.print("After Insertion Sort: ");
-        printArray(arr1);
+            JSONObject outRoot = new JSONObject(new LinkedHashMap<>());
+            outRoot.put("results", results);
 
-        SelectionSort.sort(arr2, arr2.length);
-        System.out.print("After Selection Sort:  ");
-        printArray(arr2);
-    }
+            Path outPath = Path.of("output/result.json");
+            Files.createDirectories(outPath.getParent());
+            Files.writeString(outPath, outRoot.toString(2), StandardCharsets.UTF_8);
 
-    private static void printArray(int[] arr) {
-        for (int value : arr) {
-            System.out.print(value + " ");
+            System.out.println("JSON in: " + outPath);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-        System.out.println();
     }
 
-    private static int[] generateRandomArray(int size) {
-        Random random = new Random(42);
-        int[] arr = new int[size];
-        for (int i = 0; i < size; i++) {
-            arr[i] = random.nextInt(10000);
+    private static int countUniqueEdges(Map<Character, Map<Character, Integer>> graph) {
+        int count = 0;
+        for (Map.Entry<Character, Map<Character, Integer>> entry : graph.entrySet()) {
+            char u = entry.getKey();
+            for (char v : entry.getValue().keySet()) {
+                if (u < v) count++;
+            }
         }
-        return arr;
+        return count;
     }
 
-    private static int[] generateNearlySortedArray(int size) {
-        int[] arr = new int[size];
-        Random random = new Random(42);
-
-        for (int i = 0; i < size; i++) {
-            arr[i] = i;
+    private static JSONArray mstEdgesJson(Map<Character, Map<Character, Integer>> mst) {
+        List<Edge> edges = new ArrayList<>();
+        for (Map.Entry<Character, Map<Character, Integer>> entry : mst.entrySet()) {
+            char u = entry.getKey();
+            for (Map.Entry<Character, Integer> e : entry.getValue().entrySet()) {
+                char v = e.getKey();
+                int w = e.getValue();
+                if (u < v) edges.add(new Edge(u, v, w));
+            }
         }
+        edges.sort(Comparator
+                .comparingInt((Edge e) -> e.w)
+                .thenComparing(e -> e.u)
+                .thenComparing(e -> e.v));
 
-        int swaps = Math.max(1, size / 20);
-        for (int i = 0; i < swaps; i++) {
-            int idx1 = random.nextInt(size);
-            int idx2 = random.nextInt(size);
-            int temp = arr[idx1];
-            arr[idx1] = arr[idx2];
-            arr[idx2] = temp;
-        }
-
-        return arr;
-    }
-
-    private static int[] generateReverseArray(int size) {
-        int[] arr = new int[size];
-        for (int i = 0; i < size; i++) {
-            arr[i] = size - i;
+        JSONArray arr = new JSONArray();
+        for (Edge e : edges) {
+            JSONObject obj = new JSONObject(new LinkedHashMap<>());
+            obj.put("from", String.valueOf(e.u));
+            obj.put("to", String.valueOf(e.v));
+            obj.put("weight", e.w);
+            arr.put(obj);
         }
         return arr;
+    }
+
+    private static int calculateCost(Map<Character, Map<Character, Integer>> mst) {
+        int cost = 0;
+        Set<String> seen = new HashSet<>();
+        for (Map.Entry<Character, Map<Character, Integer>> entry : mst.entrySet()) {
+            char u = entry.getKey();
+            for (Map.Entry<Character, Integer> e : entry.getValue().entrySet()) {
+                char v = e.getKey();
+                int w = e.getValue();
+                String key = Math.min(u, v) + "-" + Math.max(u, v);
+                if (seen.add(key)) cost += w;
+            }
+        }
+        return cost;
+    }
+
+    private static double format2(double value) {
+        return Double.parseDouble(String.format(Locale.US, "%.2f", value));
+    }
+
+    private static class Edge {
+        final char u, v;
+        final int w;
+        Edge(char u, char v, int w) {
+            this.u = u;
+            this.v = v;
+            this.w = w;
+        }
     }
 }
