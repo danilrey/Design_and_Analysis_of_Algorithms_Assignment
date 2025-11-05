@@ -5,161 +5,127 @@ import org.json.JSONObject;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 public class Main {
     public static void main(String[] args) {
-        try (InputStream is = Main.class.getClassLoader().getResourceAsStream("json/large_graphs.json")) {
-            if (is == null)
-                throw new IllegalStateException("Resource not found: json/input_example.json");
+        try (InputStream is = Main.class.getClassLoader().getResourceAsStream("json/large/large_1.json")) {
 
+            if (is == null)
+                throw new IllegalStateException("Resource not found");
             String jsonText = new String(is.readAllBytes(), StandardCharsets.UTF_8);
             JSONObject root = new JSONObject(jsonText);
-            JSONArray graphsArray = root.getJSONArray("graphs");
 
-            Prim prim = new Prim();
-            KruskalsMST kruskal = new KruskalsMST();
+            Graph graph = buildGraph(root);
+            int src = getSource(root);
 
-            JSONArray results = new JSONArray();
-
-            for (int i = 0; i < graphsArray.length(); i++) {
-                JSONObject g = graphsArray.getJSONObject(i);
-                int id = g.getInt("id");
-
-                Map<Character, Map<Character, Integer>> graphMap = new HashMap<>();
-                JSONArray nodes = g.getJSONArray("nodes");
-                for (int j = 0; j < nodes.length(); j++) {
-                    char node = nodes.getString(j).charAt(0);
-                    graphMap.put(node, new HashMap<>());
+            System.out.println("Graph built with V= " + graph.V);
+            System.out.println("Adjacency lists:");
+            for (int i = 0; i < graph.V; i++) {
+                System.out.print(i + ": ");
+                for (Integer nbr : graph.adj[i]) {
+                    System.out.print(nbr + " ");
                 }
-
-                JSONArray edges = g.getJSONArray("edges");
-                for (int j = 0; j < edges.length(); j++) {
-                    JSONObject edge = edges.getJSONObject(j);
-                    char u = edge.getString("from").charAt(0);
-                    char v = edge.getString("to").charAt(0);
-                    int w = edge.getInt("weight");
-                    graphMap.get(u).put(v, w);
-                    graphMap.get(v).put(u, w);
-                }
-
-                JSONObject inputStats = new JSONObject();
-                inputStats.put("vertices", nodes.length());
-                inputStats.put("edges", countUniqueEdges(graphMap));
-
-                long p0 = System.nanoTime();
-                Map<Character, Map<Character, Integer>> mstPrim = prim.primMST(graphMap);
-                long p1 = System.nanoTime();
-
-                JSONArray primEdges = mstEdgesJson(mstPrim);
-                JSONObject primObj = new JSONObject();
-                primObj.put("mst_edges", primEdges);
-                primObj.put("total_cost", calculateCost(mstPrim));
-                primObj.put("operations_count", Prim.getOperationsCount());
-                primObj.put("execution_time_ms", format2((p1 - p0) / 1_000_000.0));
-
-                KruskalsMST.comparisonCount = 0;
-                DSU.findCount = 0;
-                DSU.unionCount = 0;
-
-                long k0 = System.nanoTime();
-                Map<Character, Map<Character, Integer>> mstKruskal = kruskal.kruskalsMST(graphMap);
-                long k1 = System.nanoTime();
-
-                JSONArray kruskalEdges = mstEdgesJson(mstKruskal);
-                JSONObject kruskalObj = new JSONObject();
-                kruskalObj.put("mst_edges", kruskalEdges);
-                kruskalObj.put("total_cost", calculateCost(mstKruskal));
-                kruskalObj.put("operations_count", KruskalsMST.comparisonCount + DSU.findCount + DSU.unionCount);
-                kruskalObj.put("execution_time_ms", format2((k1 - k0) / 1_000_000.0));
-
-                JSONObject resultObj = new JSONObject(new LinkedHashMap<>());
-                resultObj.put("graph_id", id);
-                resultObj.put("input_stats", inputStats);
-                resultObj.put("prim", primObj);
-                resultObj.put("kruskal", kruskalObj);
-
-                results.put(resultObj);
+                System.out.println();
             }
 
-            JSONObject outRoot = new JSONObject(new LinkedHashMap<>());
-            outRoot.put("results", results);
+            long start = System.nanoTime();
+//                runKosaraju(graph);
+//            Graph graph2 = buildCondensation(graph);
+//            List<Integer> result = runTopological(graph2);
+//            int[] result = runShortestPath(graph2, src);
+            long end = System.nanoTime();
+//            System.out.println(result);
+            System.out.println((end - start) / 1000000.0 + " ms");
 
-            Path outPath = Path.of("output/result.json");
-            Files.createDirectories(outPath.getParent());
-            Files.writeString(outPath, outRoot.toString(2), StandardCharsets.UTF_8);
 
-            System.out.println("JSON in: " + outPath);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private static int countUniqueEdges(Map<Character, Map<Character, Integer>> graph) {
-        int count = 0;
-        for (Map.Entry<Character, Map<Character, Integer>> entry : graph.entrySet()) {
-            char u = entry.getKey();
-            for (char v : entry.getValue().keySet()) {
-                if (u < v) count++;
+    static Graph buildGraph(JSONObject root) {
+        int n = root.optInt("n", -1);
+        if (n < 0) throw new IllegalArgumentException("Missing or invalid 'n' in JSON");
+
+        boolean directed = root.optBoolean("directed", true);
+        JSONArray edges = root.optJSONArray("edges");
+
+        Graph graph = new Graph(n);
+
+        if (edges != null) {
+            for (int i = 0; i < edges.length(); i++) {
+                JSONObject e = edges.getJSONObject(i);
+                int u = e.getInt("u");
+                int v = e.getInt("v");
+                int w = e.optInt("w", 1);
+
+
+                if (u < 0 || u >= n || v < 0 || v >= n) {
+                    throw new IllegalArgumentException("Edge endpoint out of range: " + u + " -> " + v);
+                }
+
+                graph.addEdge(u, v, w);
+                if (!directed) graph.addEdge(v, u, w);
             }
         }
-        return count;
+
+        return graph;
     }
 
-    private static JSONArray mstEdgesJson(Map<Character, Map<Character, Integer>> mst) {
-        List<Edge> edges = new ArrayList<>();
-        for (Map.Entry<Character, Map<Character, Integer>> entry : mst.entrySet()) {
-            char u = entry.getKey();
-            for (Map.Entry<Character, Integer> e : entry.getValue().entrySet()) {
-                char v = e.getKey();
-                int w = e.getValue();
-                if (u < v) edges.add(new Edge(u, v, w));
+    static int getSource(JSONObject root) {
+        int n = root.optInt("n", -1);
+        if (n < 0) throw new IllegalArgumentException("Missing or invalid 'n' in JSON");
+        return root.optInt("source", -1);
+    }
+
+    static void runKosaraju(Graph graph) {
+        System.out.println("Kosaraju");
+        Kosaraju.printSCC(graph);
+        System.out.println("Number of operations: " + (Kosaraju.getFirstPassEdges() + Kosaraju.getFirstPassNodeVisits()));
+    }
+
+    static List<Integer> runTopological(Graph graph) {
+        System.out.println("Topological sort");
+        List<Integer> result = TopologicalDFS.topologicalSort(graph.adj);
+        System.out.println("Number of operations: " +(TopologicalDFS.getEdgeTraversals() + TopologicalDFS.getNodeVisits()));
+        return result;
+    }
+
+    static Graph buildCondensation(Graph graph) {
+        if (graph == null) throw new IllegalArgumentException("graph must not be null");
+
+        int[] compId = new int[graph.V];
+        Graph cond = CondensationKosaraju.buildCondensationGraph(graph, compId);
+
+        System.out.println("Condensed graph V= " + cond.V);
+        for (int i = 0; i < cond.V; i++) {
+            System.out.print(i + ": ");
+            for (Object nbr : cond.adj[i]) {
+                System.out.print(nbr + " ");
             }
+            System.out.println();
         }
-        edges.sort(Comparator
-                .comparingInt((Edge e) -> e.w)
-                .thenComparing(e -> e.u)
-                .thenComparing(e -> e.v));
 
-        JSONArray arr = new JSONArray();
-        for (Edge e : edges) {
-            JSONObject obj = new JSONObject(new LinkedHashMap<>());
-            obj.put("from", String.valueOf(e.u));
-            obj.put("to", String.valueOf(e.v));
-            obj.put("weight", e.w);
-            arr.put(obj);
-        }
-        return arr;
+        return cond;
     }
 
-    private static int calculateCost(Map<Character, Map<Character, Integer>> mst) {
-        int cost = 0;
-        Set<String> seen = new HashSet<>();
-        for (Map.Entry<Character, Map<Character, Integer>> entry : mst.entrySet()) {
-            char u = entry.getKey();
-            for (Map.Entry<Character, Integer> e : entry.getValue().entrySet()) {
-                char v = e.getKey();
-                int w = e.getValue();
-                String key = Math.min(u, v) + "-" + Math.max(u, v);
-                if (seen.add(key)) cost += w;
-            }
-        }
-        return cost;
+    static int[] runShortestPath(Graph graph, int src) {
+        System.out.println("Shortest path");
+        int[] path = ShortestPath.shortestPathDAG(graph, src);
+        ShortestPath.printDistances(path,src);
+        System.out.println("Number of Operations: " + (ShortestPath.getRelaxations() + ShortestPath.getSuccessfulRelaxations()));
+        return path;
     }
 
-    private static double format2(double value) {
-        return Double.parseDouble(String.format(Locale.US, "%.2f", value));
+    static int[] runLongestPath(Graph graph, int src) {
+        System.out.println("Shortest path");
+        int[] path = ShortestPath.longestPathDAG(graph, src);
+        ShortestPath.printDistances(path,src);
+        System.out.println("Number of Operations: " + (ShortestPath.getRelaxations() + ShortestPath.getSuccessfulRelaxations()));
+        return path;
     }
 
-    private static class Edge {
-        final char u, v;
-        final int w;
-        Edge(char u, char v, int w) {
-            this.u = u;
-            this.v = v;
-            this.w = w;
-        }
-    }
 }
