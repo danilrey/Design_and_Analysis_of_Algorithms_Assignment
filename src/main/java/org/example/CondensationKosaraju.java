@@ -101,16 +101,15 @@ public class CondensationKosaraju {
         sccCount = cid;
 
         Graph cond = new Graph(cid);
-        Set<Long> seenEdges = new HashSet<>();
+        Set<Integer>[] seen = new Set[cid];
         for (int u = 0; u < graph.V; u++) {
             for (Integer v : graph.adj[u]) {
                 int cu = compId[u];
                 int cv = compId[v];
 
                 if (cu != cv) {
-                    long key = (((long) cu) << 32) | (cv & 0xffffffffL);
-                    if (!seenEdges.contains(key)) {
-                        seenEdges.add(key);
+                    if (seen[cu] == null) seen[cu] = new HashSet<>();
+                    if (seen[cu].add(cv)) {
                         cond.addEdge(cu, cv, 1);
                     }
                 }

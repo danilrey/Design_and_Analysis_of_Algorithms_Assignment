@@ -33,9 +33,9 @@ public class Main {
 
             long start = System.nanoTime();
 //                runKosaraju(graph);
-//            Graph graph2 = buildCondensation(graph);
+            Graph graph2 = buildCondensation(graph);
 //            List<Integer> result = runTopological(graph2);
-//            int[] result = runShortestPath(graph2, src);
+            int[] result = runShortestPath(graph2, src);
             long end = System.nanoTime();
 //            System.out.println(result);
             System.out.println((end - start) / 1000000.0 + " ms");
